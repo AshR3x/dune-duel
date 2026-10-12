@@ -67,6 +67,8 @@ export class FX {
     }
     this.hi = 0; this.ti = 0; this.pi = 0;
     this.smokes = [];
+    this.fires = [];
+    this.booms = [];
     this.light = new THREE.PointLight(0xffb060, 0, 10, 2);
     scene.add(this.light);
     this.lightT = 0;
@@ -113,7 +115,41 @@ export class FX {
     return s;
   }
 
+  explosion(pos) {
+    const m = new THREE.Mesh(boomGeo, new THREE.MeshBasicMaterial({ color: 0xffa83a, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending }));
+    m.position.copy(pos); m.userData = { t: 0 };
+    this.scene.add(m); this.booms.push(m);
+    for (let i = 0; i < 10; i++) {
+      const p = this.puffs[this.pi++ % this.puffs.length];
+      p.position.copy(pos);
+      p.userData.t = 0.35;
+      p.userData.v.set((Math.random() - 0.5) * 9, Math.random() * 6, (Math.random() - 0.5) * 9);
+      p.material.opacity = 0.9; p.scale.setScalar(2); p.visible = true;
+    }
+    this.light.position.copy(pos); this.light.intensity = 160; this.lightT = 0.2;
+  }
+
+  addFire(x, z, life = 7, radius = 2.4) {
+    const f = new Fire(x, z, life, radius);
+    this.scene.add(f.group);
+    this.fires.push(f);
+    return f;
+  }
+
   update(dt) {
+    for (let i = this.booms.length - 1; i >= 0; i--) {
+      const m = this.booms[i];
+      m.userData.t += dt;
+      const k = m.userData.t / 0.4;
+      if (k >= 1) { this.scene.remove(m); m.material.dispose(); this.booms.splice(i, 1); continue; }
+      m.scale.setScalar(0.5 + 5.5 * (1 - Math.pow(1 - k, 2)));
+      m.material.opacity = 0.95 * (1 - k);
+    }
+    for (let i = this.fires.length - 1; i >= 0; i--) {
+      const f = this.fires[i];
+      f.update(dt);
+      if (f.t > f.life) { this.scene.remove(f.group); f.dispose(); this.fires.splice(i, 1); }
+    }
     for (const t of this.tracers) if (t.visible && (t.userData.t -= dt) <= 0) t.visible = false;
     for (const p of this.puffs) {
       if (!p.visible) continue;
@@ -135,10 +171,49 @@ export class FX {
   clear() {
     for (const s of this.smokes) { this.scene.remove(s.group); s.dispose(); }
     this.smokes.length = 0;
+    for (const f of this.fires) { this.scene.remove(f.group); f.dispose(); }
+    this.fires.length = 0;
+    for (const m of this.booms) { this.scene.remove(m); m.material.dispose(); }
+    this.booms.length = 0;
     for (const h of this.holes) h.visible = false;
     for (const t of this.tracers) t.visible = false;
     for (const p of this.puffs) p.visible = false;
   }
+}
+
+const boomGeo = new THREE.IcosahedronGeometry(1, 1);
+const flameGeo = new THREE.ConeGeometry(0.28, 1, 5);
+// A molotov fire patch: flickering low-poly flames over a scorched disc.
+export class Fire {
+  constructor(x, z, life, radius) {
+    this.x = x; this.z = z; this.t = 0; this.life = life; this.radius = radius;
+    this.group = new THREE.Group();
+    this.group.position.set(x, 0, z);
+    this.mats = [0xff5a14, 0xff9d2e, 0xffd25a].map((c) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.85, depthWrite: false }));
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(radius, 12), new THREE.MeshBasicMaterial({ color: 0x1c130c, transparent: true, opacity: 0.55, depthWrite: false }));
+    disc.rotation.x = -Math.PI / 2; disc.position.y = 0.02;
+    this.group.add(disc); this.disc = disc;
+    this.flames = [];
+    for (let i = 0; i < 22; i++) {
+      const m = new THREE.Mesh(flameGeo, this.mats[i % 3]);
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * radius * 0.92;
+      m.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+      m.userData = { ph: Math.random() * 6, h: 0.6 + Math.random() * 0.8 };
+      this.group.add(m); this.flames.push(m);
+    }
+  }
+  get strength() { return Math.min(1, this.t / 0.5) * (this.t > this.life - 1.2 ? Math.max(0, (this.life - this.t) / 1.2) : 1); }
+  update(dt) {
+    this.t += dt;
+    const k = this.strength;
+    for (const m of this.flames) {
+      const u = m.userData, h = u.h * k * (0.75 + 0.35 * Math.sin(this.t * 14 + u.ph));
+      m.scale.set(1, Math.max(0.01, h), 1);
+      m.position.y = h / 2;
+    }
+    this.disc.material.opacity = 0.55 * k;
+  }
+  dispose() { for (const m of this.mats) m.dispose(); this.disc.geometry.dispose(); this.disc.material.dispose(); }
 }
 
 // A smoke cloud: a ball of low-poly puffs that grows, holds, then thins out.

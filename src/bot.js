@@ -2,7 +2,7 @@
 // is blocked by smoke, can be flashed, and has to turn and aim before it hits you.
 import * as THREE from 'three';
 import { lineClear, findPath, pxToWorld, GOALS, resolveCircle, SPAWNS } from './map.js';
-import { buildWorldGun } from './weapons.js';
+import { buildWorldGun, WEAPONS, GRENADES, SHOP, allowedFor, defaultPistol, isGun } from './weapons.js';
 import { makeMuzzleFlash, flashShow, flashTick } from './fx.js';
 import { sfx } from './audio.js';
 
@@ -40,16 +40,24 @@ export function makeModel(color) {
   const aim = new THREE.Group();
   aim.position.set(0, 1.35, -0.1);
   root.add(aim);
-  const gun = buildWorldGun('ak');
-  gun.group.position.set(0.16, -0.08, -0.15);
-  gun.group.scale.setScalar(1.15);
-  aim.add(gun.group);
   add(aim, 0.12, 0.12, 0.45, shirt, 0.2, -0.05, 0.05);
   add(aim, 0.12, 0.12, 0.4, shirt, -0.05, -0.05, -0.2);
-  const flash = makeMuzzleFlash(0.28);
-  flash.position.copy(gun.muzzle.position);
-  gun.group.add(flash);
-  return { root, legL, legR, aim, flash, head };
+  const model = { root, legL, legR, aim, flash: null, head, gunGroup: null, gunId: null };
+  // swap the held weapon (the model is rebuilt per weapon; it is cheap and happens once per round)
+  model.setGun = (id) => {
+    if (model.gunId === id) return;
+    if (model.gunGroup) aim.remove(model.gunGroup);
+    const gun = buildWorldGun(id);
+    gun.group.position.set(0.16, -0.08, -0.15);
+    gun.group.scale.setScalar(1.15);
+    aim.add(gun.group);
+    const flash = makeMuzzleFlash(Math.max(0.18, (WEAPONS[id]?.flash ?? 0.2) * 1.4));
+    flash.position.copy(gun.muzzle ? gun.muzzle.position : new THREE.Vector3(0, 0, -0.3));
+    gun.group.add(flash);
+    model.flash = flash; model.gunGroup = gun.group; model.gunId = id;
+  };
+  model.setGun('ak47');
+  return model;
 }
 
 export class Bot {
@@ -60,19 +68,105 @@ export class Bot {
     scene.add(this.model.root);
     this.x = 0; this.z = 0; this.y = 0; this.yaw = 0; this.pitch = 0;
     this.eyeY = BOT_EYE;
+    this.crouch = 0; this.wantCrouch = false; this.crouchPick = false;
     this.alive = true; this.hp = 100;
     this.deathT = 0;
     this.speed = 0; this.walkPhase = 0; this.stepT = 0;
     this.vx = 0; this.vz = 0;
+    this.money = 800; this.side = 'T';
+    this.defaultLoadout('T');
+  }
+
+  // ---- loadout ----
+  defaultLoadout(side) {
+    this.side = side;
+    this.primary = null; this.secondary = defaultPistol(side); this.armor = 0; this.helmet = false;
+    this.nades = { he: 0, flash: 0, smoke: 0, molotov: 0, incendiary: 0, decoy: 0 };
+    this.ammo = {};
+    this.equip(this.secondary);
+  }
+
+  equip(id) {
+    const w = WEAPONS[id];
+    if (!this.ammo[id]) this.ammo[id] = { mag: w.mag, reserve: w.reserve };
+    this.weapon = id; this.w = w; this.cur = this.ammo[id];
+    this.reloadT = 0;
+    this.model.setGun(id);
+  }
+
+  get mag() { return this.cur.mag; }
+  set mag(v) { this.cur.mag = v; }
+  get reserve() { return this.cur.reserve; }
+  set reserve(v) { this.cur.reserve = v; }
+
+  give(id) {
+    const w = WEAPONS[id];
+    if (w.cls === 'pistol') this.secondary = id; else this.primary = id;
+    this.ammo[id] = { mag: w.mag, reserve: w.reserve };
+  }
+
+  dropIds() { return [this.primary, this.secondary].filter(Boolean); }
+
+  // Spends money the way a CS bot would: full buy when rich, force or save when not.
+  buy(side, roundInHalf) {
+    let m = this.money;
+    const bought = [];
+    const buyW = (id) => { const w = WEAPONS[id]; if (!w || w.price > m || !allowedFor(w, side)) return false; m -= w.price; this.give(id); bought.push(w.name); return true; };
+    const buyArmor = (helm) => {
+      const p = helm ? (this.armor > 0 ? (this.helmet ? 650 : 350) : 1000) : 650;
+      if (m < p || (this.armor >= 70 && (this.helmet || !helm))) return false;
+      m -= p; this.armor = 100; this.helmet = this.helmet || helm; bought.push(helm ? 'Kevlar+Helmet' : 'Kevlar'); return true;
+    };
+    const total = () => Object.values(this.nades).reduce((a, b) => a + b, 0);
+    const buyNade = (id) => {
+      const g = GRENADES[id];
+      if (!allowedFor(g, side) || m < g.price || total() >= 4 || this.nades[id] >= g.max) return false;
+      m -= g.price; this.nades[id]++; bought.push(g.name); return true;
+    };
+    const fire = side === 'T' ? 'molotov' : 'incendiary';
+    const pickFrom = (ids, budget = m) => {
+      const ok = ids.filter((id) => allowedFor(WEAPONS[id], side) && WEAPONS[id].price <= budget);
+      return ok.length ? ok[(Math.random() * ok.length) | 0] : null;
+    };
+    const pistolRound = roundInHalf === 1;
+    if (this.primary && m >= 650 && this.armor < 40) buyArmor(true);
+    if (!this.primary) {
+      if (pistolRound) {
+        const r = Math.random();
+        if (r < 0.5) { buyArmor(false); buyNade('flash'); }
+        else if (r < 0.8) { buyW(pickFrom(['p250', 'tec9', 'fiveseven', 'cz75', 'dualies'])); buyNade('flash'); buyNade('smoke'); }
+        else buyW('deagle');
+      } else if (m >= 3700) {
+        const rifles = side === 'T' ? ['ak47', 'ak47', 'ak47', 'galil', 'sg553'] : ['m4a4', 'm4a4', 'm4a1s', 'famas', 'aug'];
+        if (m >= 5600 && Math.random() < 0.18) buyW('awp'); else buyW(pickFrom(rifles));
+        buyArmor(true);
+        for (const id of ['flash', 'smoke', 'he', fire]) if (Math.random() < 0.7) buyNade(id);
+      } else if (m >= 2000 && Math.random() < 0.65) {
+        const pool = m >= 3000 ? ['mp7', 'ump45', 'p90', 'bizon', 'nova', 'xm1014', 'mag7', 'sawedoff', 'galil', 'famas'] : ['mac10', 'mp9', 'mp7', 'ump45', 'bizon', 'nova', 'mag7', 'sawedoff'];
+        const id = pickFrom(pool, m - 650);
+        if (id) buyW(id);
+        buyArmor(false); buyNade('flash');
+      } else if (m < 2000 && Math.random() < 0.55) {
+        // save round
+      } else {
+        if (m >= 1000 && Math.random() < 0.5) buyW(pickFrom(['p250', 'deagle', 'fiveseven', 'tec9', 'cz75', 'dualies'], m - 650));
+        buyArmor(false); buyNade('flash');
+      }
+    } else if (m > 1500) {
+      for (const id of ['flash', 'smoke', 'he', fire]) if (Math.random() < 0.6) buyNade(id);
+    }
+    this.money = m;
+    if (this.primary) this.equip(this.primary); else this.equip(this.secondary);
+    return bought;
   }
 
   setDifficulty(key) { this.d = DIFFICULTY[key]; }
 
   reset(x, z, yaw) {
     this.x = x; this.z = z; this.yaw = yaw; this.pitch = 0;
-    this.hp = 100; this.alive = true; this.deathT = 0;
-    this.mag = 30; this.reserve = 90; this.reloadT = 0;
-    this.smokes = 1; this.flashes = 1;
+    this.hp = 100; this.alive = true; this.deathT = 0; this.crouch = 0; this.crouchPick = false; this.eyeY = BOT_EYE;
+    for (const id of this.dropIds()) { const w = WEAPONS[id], a = this.ammo[id]; const need = Math.min(w.mag - a.mag, a.reserve); a.mag += need; a.reserve -= need; }
+    this.equip(this.primary || this.secondary);
     this.state = 'roam'; this.path = null; this.pathI = 0; this.goalT = 0;
     this.seenT = 0; this.engaged = false; this.lastSeen = null; this.sawRecently = 0;
     this.nextShot = 0; this.burst = 0; this.burstLen = 3; this.pauseT = 0;
@@ -83,7 +177,32 @@ export class Bot {
     this.model.root.position.y = 0;
     this.model.root.visible = true;
     this.model.aim.rotation.set(0, 0, 0);
+    if (this.skin) this.skin.play('Idle', { fade: 0 });
     this.syncModel();
+  }
+
+  // Swaps the blocky body for a rigged character; the gun and muzzle flash stay on the aim group.
+  setSkin(skin) {
+    if (this.skin) this.skin.dispose();
+    this.skin = skin;
+    if (!skin) return;
+    const m = this.model;
+    m.root.add(skin.root);
+    for (const c of m.root.children) if (c !== m.aim && c !== skin.root) c.visible = false;
+    for (const c of m.aim.children) if (c !== m.gunGroup) c.visible = false;
+    m.aim.position.y = 1.1;                       // hold the gun at chest height on the taller rig
+    skin.play('Idle', { fade: 0 });
+  }
+
+  updateSkin(dt) {
+    const k = this.skin;
+    if (!this.alive) k.play('Death', { loop: false, fade: 0.1 });
+    else if (this.speed > 3.6) k.play('Run_Carry', { speed: Math.min(1.3, this.speed / 5) });
+    else if (this.speed > 0.4) k.play('Walk_Carry', { speed: Math.max(0.6, this.speed / 3) });
+    else k.play('Idle');
+    k.crouchK = this.alive ? this.crouch : 0;
+    this.model.aim.position.y = 1.1 - 0.4 * this.crouch;          // the gun sinks with the body
+    k.update(dt);
   }
 
   die() { this.alive = false; this.hp = 0; this.deathT = 0; this.speed = 0; }
@@ -105,6 +224,7 @@ export class Bot {
     r.position.x = this.x; r.position.z = this.z;
     r.rotation.y = this.yaw;
     this.model.aim.rotation.x = this.pitch;
+    if (!this.skin) this.model.root.scale.y = 1 - 0.3 * this.crouch;   // blocky fallback body just squashes
     const sw = Math.sin(this.walkPhase) * Math.min(1, this.speed / 4) * 0.7;
     this.model.legL.rotation.x = sw; this.model.legR.rotation.x = -sw;
   }
@@ -113,6 +233,11 @@ export class Bot {
     const p = { x: this.x + dx, z: this.z + dz };
     resolveCircle(p, 0.38);
     this.x = p.x; this.z = p.z;
+  }
+
+  startReload() {
+    this.reloadT = this.w.shell ? this.w.reload * (this.w.mag - this.mag) : this.w.reload;
+    sfx.reload({ x: this.x, z: this.z });
   }
 
   steerTo(tx, tz, speed, dt) {
@@ -153,23 +278,28 @@ export class Bot {
 
   update(dt, g) {
     flashTick(this.model.flash, dt);
+    if (this.skin) this.updateSkin(dt);
     if (!this.alive) {
       this.deathT += dt;
+      if (this.skin) return;
       const k = Math.min(1, this.deathT / 0.5);
       this.model.root.rotation.x = -Math.PI / 2 * (1 - Math.pow(1 - k, 2));
       this.model.root.position.y = 0.12 * k;
       return;
     }
     const P = g.player;
+    const sf = Math.min(1.15, this.w.speed / 0.86), cls = this.w.cls;
     this.sinceHit += dt;
     this.nextShot -= dt; this.pauseT -= dt; this.strafeT -= dt; this.throwCool -= dt; this.walkT -= dt;
     if (this.flashT > 0) this.flashT -= dt;
     const flashed = this.flashT > 0;
     this.speed = 0; this.vx = 0; this.vz = 0;
+    // crouching: eased in and out; set again each frame by the fight logic below
+    this.wantCrouch = false;
 
     if (this.reloadT > 0) {
       this.reloadT -= dt;
-      if (this.reloadT <= 0) { const n = Math.min(30 - this.mag, this.reserve); this.mag += n; this.reserve -= n; }
+      if (this.reloadT <= 0) { const n = Math.min(this.w.mag - this.mag, this.reserve); this.mag += n; this.reserve -= n; }
     }
 
     if (!g.live) { this.syncModel(); return; }
@@ -189,6 +319,14 @@ export class Bot {
       this.lastSeen = { x: P.x + rnd(-2.5, 2.5), z: P.z + rnd(-2.5, 2.5), t: 0 };
       if (this.state !== 'engage') { this.state = 'hunt'; this.path = null; }
     }
+    if (!sees && !flashed && g.decoys) {
+      for (const dc of g.decoys) {
+        if (Math.hypot(dc.x - this.x, dc.z - this.z) < dc.r && this.state !== 'engage') {
+          this.lastSeen = { x: dc.x + rnd(-1.5, 1.5), z: dc.z + rnd(-1.5, 1.5), t: 0 };
+          this.state = 'hunt'; this.path = null;
+        }
+      }
+    }
     if (sees) {
       this.seenT += dt;
       this.lastSeen = { x: P.x, z: P.z, t: 0, vx: P.vx, vz: P.vz };
@@ -198,7 +336,7 @@ export class Bot {
       this.sawRecently -= dt;
       if (this.lastSeen) this.lastSeen.t += dt;
     }
-    this.engaged = sees && this.seenT > this.d.react;
+    this.engaged = sees && this.seenT > this.d.react * (cls === 'sniper' ? 1.5 : 1);
     if (this.engaged) this.state = 'engage';
     else if (this.state === 'engage') { this.state = 'hunt'; this.path = null; }
 
@@ -216,7 +354,7 @@ export class Bot {
       wantYaw = Math.atan2(-dx, -dz);
       const headChance = this.d.headChance;
       if (this.aimHead === undefined || this.nextShot <= 0 && Math.random() < 0.3) this.aimHead = Math.random() < headChance;
-      const ty = P.y + (this.aimHead ? 1.6 : 1.15);
+      const ty = P.y + (this.aimHead ? 1.6 - 0.45 * (P.crouch || 0) : 1.15 - 0.35 * (P.crouch || 0));
       wantPitch = Math.atan2(ty - this.eyeY, dist);
       shootAt = { x: P.x, y: ty, z: P.z, wild: 0 };
 
@@ -225,37 +363,44 @@ export class Bot {
         this.strafeT = rnd(0.35, 0.8);
         this.strafeDir = Math.random() < 0.5 ? -1 : 1;
         this.moveT = Math.random() < 0.55 ? 0.35 : 0;   // sometimes stand still to shoot
+        this.crouchPick = this.moveT <= 0 && dist > 7 && Math.random() < 0.5;   // ...and when standing still, often crouch to shoot
+        if (this.crouchPick) this.strafeT = rnd(0.9, 1.7);
       }
       if (this.moveT > 0) {
         this.moveT -= dt;
         const nx = -dz / (dist || 1), nz = dx / (dist || 1);
-        this.moveBy(nx * this.strafeDir * 3.4 * dt, nz * this.strafeDir * 3.4 * dt);
-        this.speed = 3.4;
-        this.vx = nx * this.strafeDir * 3.4; this.vz = nz * this.strafeDir * 3.4;
+        this.moveBy(nx * this.strafeDir * 3.4 * sf * dt, nz * this.strafeDir * 3.4 * sf * dt);
+        this.speed = 3.4 * sf;
+        this.vx = nx * this.strafeDir * 3.4 * sf; this.vz = nz * this.strafeDir * 3.4 * sf;
       } else if (dist > 24) {
-        this.steerTo(this.x + (dx / dist), this.z + (dz / dist), 3.2, dt);
+        this.steerTo(this.x + (dx / dist), this.z + (dz / dist), 3.2 * sf, dt);
       }
 
       // use utility: smoke the lane when losing a long-range fight
-      if (this.smokes > 0 && this.throwCool <= 0 && dist > 14 && this.hp < 66 && this.sinceHit < 1.5 && Math.random() < dt * 1.5) {
+      if (this.nades.smoke > 0 && this.throwCool <= 0 && dist > 14 && this.hp < 66 && this.sinceHit < 1.5 && Math.random() < dt * 1.5) {
         g.botThrow(this, 'smoke', this.x + dx * 0.45, this.z + dz * 0.45);
-        this.smokes--; this.throwCool = 3;
+        this.nades.smoke--; this.throwCool = 3;
         this.lastSeen = null; this.state = 'roam'; this.path = null; this.engaged = false;
       }
     } else if (this.state === 'hunt' && this.lastSeen) {
       // go to the last known position; flash the corner first if close
       const ls = this.lastSeen;
       const ld = Math.hypot(ls.x - this.x, ls.z - this.z);
-      if (this.flashes > 0 && this.throwCool <= 0 && ld > 8 && ld < 22 && !lineClear(this.x, this.z, ls.x, ls.z) && Math.random() < dt * 1.2) {
-        g.botThrow(this, 'flash', ls.x, ls.z);
-        this.flashes--; this.throwCool = 2.2; this.waitT = 1.5;
+      if (this.throwCool <= 0 && ld > 8 && ld < 22 && !lineClear(this.x, this.z, ls.x, ls.z) && Math.random() < dt * 1.2) {
+        const fireId = this.nades.molotov > 0 ? 'molotov' : 'incendiary';
+        const opts = ['flash', 'he', fireId].filter((k) => this.nades[k] > 0);
+        if (opts.length) {
+          const k = opts[(Math.random() * opts.length) | 0];
+          g.botThrow(this, k, ls.x, ls.z);
+          this.nades[k]--; this.throwCool = 2.2; this.waitT = k === 'flash' ? 1.5 : 0.8;
+        }
       }
       if (this.waitT > 0) {
         this.waitT -= dt;
         wantYaw = Math.atan2(-(ls.x - this.x), -(ls.z - this.z));
       } else {
         if (!this.path || this.pathStamp !== ls) { this.setPath(g, ls.x, ls.z); this.pathStamp = ls; }
-        const sp = this.walkMode ? 3.0 : 5.0;
+        const sp = (this.walkMode ? 3.0 : 5.0) * sf;
         const done = this.followPath(sp, dt, g);
         if (done || ld < 1.6) { this.state = 'roam'; this.path = null; this.lastSeen = null; }
         else {
@@ -271,7 +416,7 @@ export class Bot {
         this.setPath(g, w.x, w.z);
         if (!this.path) this.path = null;
       }
-      const done = this.followPath(this.walkMode ? 3.0 : 5.0, dt, g);
+      const done = this.followPath((this.walkMode ? 3.0 : 5.0) * sf, dt, g);
       if (done) this.path = null;
       else if (this.path) {
         const wp = this.path[Math.min(this.pathI, this.path.length - 1)];
@@ -286,33 +431,45 @@ export class Bot {
     this.pitch += (wantPitch - this.pitch) * Math.min(1, dt * 10);
 
     // ---- shoot ----
+    const w = this.w;
     if (shootAt && this.mag > 0 && this.reloadT <= 0 && this.nextShot <= 0 && this.pauseT <= 0) {
       const aimErr = Math.abs(wrap(Math.atan2(-(shootAt.x - this.x), -(shootAt.z - this.z)) - this.yaw));
       if (aimErr < 0.1 || shootAt.wild) {
         const origin = new THREE.Vector3(this.x - Math.sin(this.yaw) * 0.4, this.eyeY - 0.15, this.z - Math.cos(this.yaw) * 0.4);
         const dir = new THREE.Vector3(shootAt.x - origin.x, shootAt.y - origin.y, shootAt.z - origin.z).normalize();
         const moving = Math.min(1, this.speed / 4);
-        const spread = shootAt.wild || (this.d.spread * (1 + this.burst * 0.45) + moving * 0.05);
+        const clsAcc = cls === 'sniper' ? 0.35 : cls === 'pistol' ? 1.2 : cls === 'smg' ? 1.1 : 1;
+        const spread = shootAt.wild || (this.d.spread * clsAcc * (1 + this.burst * (w.auto ? 0.45 : 0.2)) * (1 - 0.22 * this.crouch) + moving * (cls === 'sniper' ? 0.14 : 0.05));
         dir.x += (Math.random() - 0.5) * spread * 2;
         dir.y += (Math.random() - 0.5) * spread * 2;
         dir.z += (Math.random() - 0.5) * spread * 2;
         dir.normalize();
         this.mag--; this.burst++;
-        this.nextShot = 0.1 + (Math.random() < 0.15 ? 0.04 : 0);
+        this.nextShot = w.rate + (w.auto ? (Math.random() < 0.15 ? 0.04 : 0) : 0.06 + Math.random() * 0.14);
         flashShow(this.model.flash);
         g.botShoot(this, origin, dir);
+        const burstMax = { rifle: 7, smg: 10, lmg: 22, pistol: 3, shotgun: 1, sniper: 1 }[cls] ?? 5;
         if (this.burst >= this.burstLen) {
-          this.burst = 0; this.burstLen = 2 + ((Math.random() * 5) | 0);
+          this.burst = 0; this.burstLen = 1 + ((Math.random() * burstMax) | 0);
           const [a, b] = this.d.pause;
-          this.pauseT = rnd(a, b) * (dist > 20 ? 1.4 : 1);
+          this.pauseT = rnd(a, b) * (dist > 20 ? 1.4 : 1) * (cls === 'sniper' ? 0.2 : 1);
         }
       }
     } else if (this.mag === 0 && this.reloadT <= 0 && this.reserve > 0) {
-      this.reloadT = 2.4; sfx.reload({ x: this.x, z: this.z });
-    } else if (!shootAt && this.mag < 12 && this.reloadT <= 0 && this.reserve > 0 && this.state !== 'engage') {
-      this.reloadT = 2.4; sfx.reload({ x: this.x, z: this.z });
+      this.startReload();
+    } else if (!shootAt && this.mag < w.mag * 0.4 && this.reloadT <= 0 && this.reserve > 0 && this.state !== 'engage') {
+      this.startReload();
     }
-    if (this.mag === 0 && this.reserve === 0) { this.mag = 30; this.reserve = 90; } // never let the bot run dry
+    if (this.mag === 0 && this.reserve === 0) {
+      if (this.weapon !== this.secondary && this.secondary) this.equip(this.secondary);
+      else { this.mag = w.mag; this.reserve = w.reserve; }    // never let the bot run dry
+    }
+
+    // crouch only while holding position in a fight; moving or losing the target stands the bot back up
+    const wantC = this.state === 'engage' && this.moveT <= 0 && this.speed < 0.5 && this.crouchPick && !flashed ? 1 : 0;
+    this.crouch += (wantC - this.crouch) * Math.min(1, dt * 8);
+    if (Math.abs(this.crouch - wantC) < 0.01) this.crouch = wantC;
+    this.eyeY = BOT_EYE - 0.45 * this.crouch;
 
     // footsteps (running is loud, walking is quiet)
     if (this.speed > 0.5) {

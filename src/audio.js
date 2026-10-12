@@ -1,4 +1,5 @@
 // Everything is synthesised with WebAudio, so there are no sound files to ship.
+import { WEAPONS } from './weapons.js';
 let ctx = null, master, noise, lowpass;
 const listener = { x: 0, z: 0, yaw: 0 };
 
@@ -62,16 +63,56 @@ function voice({ dur = 0.2, noiseSrc = false, f0 = 440, f1 = f0, type = 'sine', 
 
 export const sfx = {
   shot(kind, pos) {
+    const w = WEAPONS[kind], cls = w ? w.cls : 'rifle';
+    if (w && w.silenced) {
+      voice({ dur: 0.12, noiseSrc: true, filt: 'bandpass', ff0: 2200, ff1: 900, q: 1.2, gain: 0.35, pos });
+      voice({ dur: 0.09, f0: 160, f1: 70, type: 'sine', gain: 0.3, pos });
+      return;
+    }
     if (kind === 'deagle') {
       voice({ dur: 0.5, noiseSrc: true, filt: 'lowpass', ff0: 7000, ff1: 300, gain: 1.0, pos });
       voice({ dur: 0.35, f0: 150, f1: 38, type: 'sine', gain: 1.0, pos });
       voice({ dur: 0.12, noiseSrc: true, filt: 'highpass', ff0: 2500, ff1: 1500, gain: 0.5, pos });
+    } else if (cls === 'pistol') {
+      voice({ dur: 0.22, noiseSrc: true, filt: 'lowpass', ff0: 6500, ff1: 600, gain: 0.6, pos });
+      voice({ dur: 0.14, f0: 200, f1: 70, type: 'sine', gain: 0.55, pos });
+      voice({ dur: 0.05, noiseSrc: true, filt: 'highpass', ff0: 3500, ff1: 2500, gain: 0.3, pos });
+    } else if (cls === 'smg') {
+      voice({ dur: 0.16, noiseSrc: true, filt: 'lowpass', ff0: 7000, ff1: 700, gain: 0.6, pos });
+      voice({ dur: 0.1, f0: 180, f1: 80, type: 'sine', gain: 0.5, pos });
+      voice({ dur: 0.04, noiseSrc: true, filt: 'highpass', ff0: 4000, ff1: 3000, gain: 0.3, pos });
+    } else if (cls === 'sniper') {
+      voice({ dur: 0.9, noiseSrc: true, filt: 'lowpass', ff0: 8000, ff1: 200, gain: 1.0, pos });
+      voice({ dur: 0.6, f0: 110, f1: 28, type: 'sine', gain: 1.0, pos });
+      voice({ dur: 0.15, noiseSrc: true, filt: 'highpass', ff0: 2500, ff1: 1200, gain: 0.55, pos });
+    } else if (cls === 'shotgun') {
+      voice({ dur: 0.55, noiseSrc: true, filt: 'lowpass', ff0: 5500, ff1: 250, gain: 1.0, pos });
+      voice({ dur: 0.35, f0: 100, f1: 30, type: 'sine', gain: 1.0, pos });
+    } else if (cls === 'lmg') {
+      voice({ dur: 0.28, noiseSrc: true, filt: 'lowpass', ff0: 5500, ff1: 400, gain: 0.85, pos });
+      voice({ dur: 0.2, f0: 90, f1: 40, type: 'sine', gain: 0.9, pos });
     } else {
       voice({ dur: 0.3, noiseSrc: true, filt: 'lowpass', ff0: 6000, ff1: 500, gain: 0.85, pos });
       voice({ dur: 0.18, f0: 120, f1: 45, type: 'sine', gain: 0.8, pos });
       voice({ dur: 0.07, noiseSrc: true, filt: 'highpass', ff0: 3000, ff1: 2000, gain: 0.35, pos });
     }
   },
+  cycle(pos) { voice({ dur: 0.05, noiseSrc: true, filt: 'bandpass', ff0: 1400, q: 5, gain: 0.35, delay: 0.35, pos }); voice({ dur: 0.06, noiseSrc: true, filt: 'bandpass', ff0: 800, q: 5, gain: 0.4, delay: 0.55, pos }); },
+  explode(pos) {
+    voice({ dur: 0.9, noiseSrc: true, filt: 'lowpass', ff0: 5000, ff1: 120, gain: 1.0, pos });
+    voice({ dur: 0.7, f0: 90, f1: 25, type: 'sine', gain: 1.0, pos });
+  },
+  fire(pos) { voice({ dur: 0.7, noiseSrc: true, filt: 'bandpass', ff0: 400, ff1: 1600, q: 0.8, gain: 0.5, attack: 0.1, pos }); voice({ dur: 0.25, f0: 180, f1: 60, type: 'sine', gain: 0.4, pos }); },
+  zeus(pos) {
+    voice({ dur: 0.25, noiseSrc: true, filt: 'highpass', ff0: 3000, ff1: 6000, gain: 0.8, pos });
+    voice({ dur: 0.25, f0: 1200, f1: 300, type: 'sawtooth', gain: 0.35, pos });
+  },
+  cash() { voice({ dur: 0.08, f0: 1500, f1: 1500, type: 'square', gain: 0.1 }); voice({ dur: 0.12, f0: 2200, f1: 2200, type: 'square', gain: 0.1, delay: 0.07 }); },
+  buy() { voice({ dur: 0.06, f0: 900, f1: 900, type: 'triangle', gain: 0.2 }); voice({ dur: 0.1, f0: 1350, f1: 1350, type: 'triangle', gain: 0.2, delay: 0.06 }); },
+  deny() { voice({ dur: 0.14, f0: 160, f1: 120, type: 'square', gain: 0.12 }); },
+  tick() { voice({ dur: 0.03, f0: 1800, f1: 1800, type: 'square', gain: 0.05 }); },
+  zoom() { voice({ dur: 0.08, noiseSrc: true, filt: 'bandpass', ff0: 1200, ff1: 2400, q: 3, gain: 0.25 }); },
+  pickup() { voice({ dur: 0.08, noiseSrc: true, filt: 'bandpass', ff0: 700, q: 4, gain: 0.4 }); voice({ dur: 0.06, noiseSrc: true, filt: 'highpass', ff0: 2200, gain: 0.3, delay: 0.1 }); },
   knife(pos) { voice({ dur: 0.18, noiseSrc: true, filt: 'bandpass', q: 2, ff0: 600, ff1: 3000, gain: 0.35, attack: 0.06, pos }); },
   knifeHit(pos) { voice({ dur: 0.12, noiseSrc: true, filt: 'lowpass', ff0: 2500, ff1: 400, gain: 0.7, pos }); },
   hit(head) {
