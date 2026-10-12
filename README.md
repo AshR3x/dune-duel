@@ -73,6 +73,11 @@ callouts. Spawns are at the bottom (T) and top (CT), with the two bombsite-style
 B doors from Mid to B) at a size that suits a duel. Walkable space and cover are defined as rectangles at the
 top of `src/map.js`, so the layout is easy to change.
 
+## Author
+
+Made by [AshR3x](https://github.com/AshR3x). Released under the [MIT License](LICENSE).
+Three.js (in `vendor/`) is MIT licensed by its own authors.
+
 ## Notes
 
 This is an independent hobby project. It is not affiliated with or endorsed by Valve or the makers of any
