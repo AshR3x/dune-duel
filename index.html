@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dune Duel</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2317120c'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%23ff9d2e' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23ff9d2e'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --sand: #f1e2bf; --ink: #17120c; --accent: #ff9d2e; --hp: #7ed957; --danger: #ff4d3d;
+    --panel: rgba(23, 18, 12, 0.62);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: linear-gradient(#7fb2dc, #f1dcae); overflow: hidden; color: var(--sand);
+    font-family: "Segoe UI", "Trebuchet MS", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+  #app { position: fixed; inset: 0; }
+  canvas#view { display: block; width: 100%; height: 100%; }
+  .hud { position: fixed; pointer-events: none; text-transform: uppercase; letter-spacing: 0.06em; }
+  .panel { background: var(--panel); border: 1px solid rgba(241, 226, 191, 0.18); border-radius: 6px; padding: 8px 14px; backdrop-filter: blur(2px); }
+
+  #score { top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 18px; align-items: center; font-weight: 700; font-size: 20px; }
+  #score .vs { font-size: 12px; opacity: 0.7; }
+  #score .time { font-variant-numeric: tabular-nums; min-width: 52px; text-align: center; color: var(--accent); }
+  #msg { top: 22%; left: 50%; transform: translateX(-50%); font-size: 34px; font-weight: 800; text-align: center; text-shadow: 0 2px 12px #000; white-space: pre-line; }
+  #msg small { display: block; font-size: 15px; font-weight: 500; opacity: 0.85; letter-spacing: 0.12em; margin-top: 6px; }
+
+  #vitals { left: 18px; bottom: 18px; display: flex; gap: 14px; align-items: baseline; font-size: 40px; font-weight: 800; }
+  #vitals small { font-size: 12px; opacity: 0.7; font-weight: 600; }
+  #hp.low { color: var(--danger); animation: pulse 0.7s infinite alternate; }
+  @keyframes pulse { to { opacity: 0.55; } }
+  #ammo { right: 18px; bottom: 18px; text-align: right; font-weight: 800; font-size: 40px; }
+  #ammo small { font-size: 18px; opacity: 0.7; font-weight: 600; }
+  #wname { font-size: 12px; opacity: 0.75; font-weight: 600; display: block; margin-bottom: -4px; }
+  #slots { left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 6px; }
+  .slot { padding: 6px 10px; font-size: 12px; font-weight: 700; border-radius: 5px; background: var(--panel); border: 1px solid transparent; opacity: 0.6; }
+  .slot b { color: var(--accent); margin-right: 5px; }
+  .slot.on { opacity: 1; border-color: var(--accent); }
+  .slot.empty { opacity: 0.2; }
+
+  #cross { left: 50%; top: 50%; width: 0; height: 0; }
+  #cross i { position: absolute; background: #eaffd9; box-shadow: 0 0 2px #000; }
+  #cross .h { height: 2px; width: 9px; top: -1px; }
+  #cross .v { width: 2px; height: 9px; left: -1px; }
+  #cross.hit i { background: #fff; }
+  #cross.head i { background: var(--danger); }
+  #marker { left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; opacity: 0; transition: opacity 0.18s; }
+  #marker.on { opacity: 1; transition: none; }
+  #marker::before, #marker::after { content: ""; position: absolute; left: 12px; top: -2px; width: 2px; height: 30px; background: #fff; transform: rotate(45deg); }
+  #marker::after { transform: rotate(-45deg); }
+  #marker.head::before, #marker.head::after { background: var(--danger); }
+
+  #feed { top: 12px; right: 14px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; font-size: 13px; font-weight: 700; }
+  #feed div { padding: 4px 10px; border-radius: 4px; background: var(--panel); border: 1px solid rgba(255, 157, 46, 0.5); }
+  #mini { left: 14px; top: 14px; width: 180px; height: 180px; border-radius: 6px; border: 1px solid rgba(241, 226, 191, 0.3); overflow: hidden; opacity: 0.92; }
+  #mini canvas { width: 100%; height: 100%; display: block; }
+
+  .full { position: fixed; inset: 0; pointer-events: none; opacity: 0; }
+  #flash { background: #fff; }
+  #smoke { background: rgb(206, 204, 198); }
+  #hurt { background: radial-gradient(ellipse at center, transparent 45%, rgba(255, 30, 20, 0.75) 100%); }
+  #hitdir { left: 50%; top: 50%; width: 0; height: 0; opacity: 0; }
+  #hitdir i { position: absolute; left: -40px; top: -170px; width: 80px; height: 26px; background: radial-gradient(ellipse at center top, rgba(255, 50, 30, 0.95), transparent 70%); }
+
+
+  /* ---------- main menu / loading ---------- */
+  #menu { position: fixed; inset: 0; z-index: 5; overflow: hidden; }
+  body.nomatch .hud, body.nomatch .full { display: none !important; }
+  #menu.hidden { display: none; }
+  #menu .shade { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(20,14,8,0.55) 0%, rgba(20,14,8,0.15) 45%, transparent 70%); pointer-events: none; }
+  #menu .left { position: absolute; left: clamp(16px, 4vw, 56px); top: clamp(16px, 6vh, 56px); width: min(470px, 90vw); max-height: 94vh; overflow-y: auto; scrollbar-width: none; }
+  #menu .left::-webkit-scrollbar { display: none; }
+  .brand { font-size: min(52px, 9.4vw); font-weight: 200; letter-spacing: 0.28em; text-transform: uppercase; color: #fff; text-shadow: 0 2px 18px rgba(0,0,0,0.5); line-height: 1; margin: 0 0 clamp(14px, 3vh, 30px); white-space: nowrap; }
+  .loadbox { margin-bottom: clamp(12px, 2.5vh, 22px); }
+  #loadlabel { text-align: center; font-size: 13px; font-weight: 600; letter-spacing: 0.12em; color: #fff; text-shadow: 0 1px 4px #000; margin-bottom: 3px; }
+  #loadbar { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; padding: 3px; background: rgba(10, 8, 5, 0.85); border: 1px solid rgba(255,255,255,0.25); }
+  #loadbar i { height: 11px; background: rgba(255,255,255,0.08); transition: background 0.15s; }
+  #loadbar i.on { background: linear-gradient(#ffc069, #ff9d2e); box-shadow: 0 0 6px rgba(255,157,46,0.6); }
+  .xp { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #fff; text-shadow: 0 1px 3px #000; margin-top: 2px; }
+  .abtn { position: relative; display: flex; align-items: stretch; width: 100%; height: clamp(44px, 8.6vh, 62px); margin: 0 0 10px; padding: 0; border: 0; background: none; cursor: pointer; color: #fff; font: inherit; text-align: left; filter: drop-shadow(0 3px 5px rgba(0,0,0,0.45)); transition: transform 0.12s, filter 0.12s; }
+  .abtn:hover:not(:disabled) { transform: translateX(8px); filter: drop-shadow(0 3px 5px rgba(0,0,0,0.45)) brightness(1.12); }
+  .abtn:disabled { cursor: default; filter: grayscale(0.85) brightness(0.8) drop-shadow(0 3px 5px rgba(0,0,0,0.45)); }
+  .abtn .ico { flex: 0 0 clamp(44px, 8.6vh, 62px); display: flex; align-items: center; justify-content: center; background: #3a3e45; border: 3px solid #555a63; }
+  .abtn .ico svg { width: 55%; height: 55%; fill: #fff; }
+  .abtn .lbl { flex: 1; display: flex; align-items: center; padding: 0 22px; margin-left: 6px; font-size: clamp(19px, 3.8vh, 30px); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; text-shadow: 0 2px 3px rgba(0,0,0,0.5);
+    background: linear-gradient(100deg, #d9731a 0%, #b4540d 78%, #5a5e66 78.2%, #6b7078 100%); clip-path: polygon(0 0, 92% 0, 100% 100%, 0 100%); }
+  .abtn.alt .lbl { background: linear-gradient(100deg, #8a5a2a 0%, #6a431b 78%, #5a5e66 78.2%, #6b7078 100%); }
+  .panel2 { margin: 4px 0 12px; padding: 14px 16px; background: rgba(15, 11, 6, 0.82); border: 1px solid rgba(255,255,255,0.18); color: #f1e2bf; font-size: 13px; }
+  .panel2.hidden { display: none; }
+  .panel2 table { border-collapse: collapse; width: 100%; margin-bottom: 10px; }
+  .panel2 td { padding: 2px 0; } .panel2 td:first-child { color: #ff9d2e; font-weight: 700; width: 38%; }
+  .panel2 .row { display: flex; gap: 10px; align-items: center; }
+  input[type=range] { accent-color: #ff9d2e; flex: 1; }
+  #menu.ctl #note, #menu.ctl .loadout { display: none; }
+  .loadout { display: flex; align-items: center; gap: 12px; width: min(420px, 100%); margin-top: 6px; padding: 10px 14px; background: linear-gradient(100deg, #3b2a63, #1d1530); border: 2px solid #7c4dff; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+  .loadout b { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .loadout span { display: block; font-size: 11px; opacity: 0.8; margin-top: 2px; }
+  .loadout svg { width: 54px; height: 34px; fill: #cfd3dc; flex: 0 0 auto; }
+  #note { position: absolute; left: clamp(16px, 4vw, 56px); bottom: 12px; font-size: 11px; color: #fff; opacity: 0.85; text-shadow: 0 1px 3px #000; max-width: 60vw; }
+
+</style>
+</head>
+<body>
+<div id="app"><canvas id="view"></canvas></div>
+
+<div id="flash" class="full"></div>
+<div id="smoke" class="full"></div>
+<div id="hurt" class="full"></div>
+<div id="hitdir" class="hud"><i></i></div>
+
+<div id="mini" class="hud"><canvas id="minimap" width="180" height="180"></canvas></div>
+<div id="score" class="hud panel"><span id="sp">0</span><span class="vs">You</span><span class="time" id="timer">1:15</span><span class="vs">Bot</span><span id="sb">0</span></div>
+<div id="msg" class="hud"></div>
+<div id="feed" class="hud"></div>
+<div id="cross" class="hud"><i class="h" style="left:-14px"></i><i class="h" style="left:5px"></i><i class="v" style="top:-14px"></i><i class="v" style="top:5px"></i></div>
+<div id="marker" class="hud"></div>
+<div id="vitals" class="hud"><span id="hp">100</span><small>HP</small></div>
+<div id="slots" class="hud"></div>
+<div id="ammo" class="hud panel"><span id="wname"></span><span id="mag">30</span> <small id="res">/ 90</small></div>
+
+<div id="menu">
+  <div class="shade"></div>
+  <div class="left">
+    <div class="brand">DUNE DUEL</div>
+    <div class="loadbox">
+      <div id="loadlabel">LOADING</div>
+      <div id="loadbar"></div>
+      <div class="xp"><span id="lw">0 WINS</span><span id="ll">0 LOSSES</span></div>
+    </div>
+    <button id="play" class="abtn" disabled>
+      <span class="ico"><svg viewBox="0 0 24 24"><path d="M6 3.5v17l14-8.5z"/></svg></span><span class="lbl" id="playlbl">Deploy</span>
+    </button>
+    <button id="diffbtn" class="abtn alt">
+      <span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 7.3H22l-6.2 4.5 2.4 7.4L12 16.6 5.8 21.2l2.4-7.4L2 9.3h7.6z"/></svg></span><span class="lbl" id="difflbl">Difficulty: Normal</span>
+    </button>
+    <button id="infobtn" class="abtn alt">
+      <span class="ico"><svg viewBox="0 0 24 24"><path d="M4 5h16v2H4zm0 6h16v2H4zm0 6h16v2H4z"/></svg></span><span class="lbl">Controls</span>
+    </button>
+    <div id="controls" class="panel2 hidden">
+      <table>
+        <tr><td>WASD / Space</td><td>Move / jump</td></tr>
+        <tr><td>Shift</td><td>Walk (silent)</td></tr>
+        <tr><td>Mouse / LMB</td><td>Aim / fire (RMB: knife stab)</td></tr>
+        <tr><td>R</td><td>Reload</td></tr>
+        <tr><td>1 2 3</td><td>AK-47 / Desert Eagle / Knife</td></tr>
+        <tr><td>4 5 / Q</td><td>Smoke / Flashbang (LMB to throw) / last weapon</td></tr>
+      </table>
+      <div class="row"><span>Sensitivity</span><input id="sens" type="range" min="0.4" max="3" step="0.05" value="1"><span id="sensv">1.00</span></div>
+    </div>
+    <div class="loadout">
+      <svg viewBox="0 0 54 34"><path d="M2 14h30l4-3h16v6H38l-3 3H20l-2 11h-7l2-11H2z"/></svg>
+      <div><b>Loadout</b><span>AK-47 &middot; Desert Eagle &middot; Knife &middot; Smoke &middot; Flashbang</span></div>
+    </div>
+  </div>
+  <div id="note">First to 7 rounds wins. Headphones help: running is loud, Shift-walking is silent.</div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
