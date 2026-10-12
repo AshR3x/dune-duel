@@ -7,6 +7,10 @@ three-lane desert map: **Long A** down the right, **Mid** through the centre, **
 
 ![Gameplay: CS:GO-style HUD with round radar, a bot with a random skin crossing a smoke cloud, AK-47 in hand](docs/gameplay.png)
 
+| Buy wheel with item pictures | Karambit with a custom blade colour |
+| --- | --- |
+| ![Radial buy wheel showing the rifles, AK-47 selected](docs/buy-wheel.png) | ![A red karambit held across the view](docs/karambit.png) |
+
 Weapons: the full CS:GO-style arsenal (8 pistols, 6 SMGs, 7 rifles, 4 snipers, 4 shotguns, 2 LMGs, knife, Zeus) plus
 HE, flashbang, smoke, molotov/incendiary and decoy grenades, armor and helmets. You earn cash from kills and rounds
 and spend it in a radial buy wheel with pictures of every item. First to 7 rounds wins; sides swap at halftime (after round 6).
