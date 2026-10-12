@@ -75,7 +75,7 @@ top of `src/map.js`, so the layout is easy to change.
 
 ## Author
 
-Made by [AshR3x](https://github.com/AshR3x). Released under the [MIT License](LICENSE).
+Made by [AshR3x](https://github.com/AshR3x) with [Claude](https://claude.com/claude-code) (Anthropic) as a coding collaborator. Released under the [MIT License](LICENSE).
 Three.js (in `vendor/`) is MIT licensed by its own authors.
 
 ## Notes
