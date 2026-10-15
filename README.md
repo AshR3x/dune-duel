@@ -5,7 +5,7 @@ three-lane desert map: **Long A** down the right, **Mid** through the centre, **
 
 ![Main menu](docs/menu.png)
 
-![Gameplay: CS:GO-style HUD with round radar, a bot with a random skin crossing a smoke cloud, AK-47 in hand](docs/gameplay.png)
+![Gameplay: CS:GO-style HUD with round radar, a blocky bot with a random skin running past a smoke cloud, AK-47 in hand](docs/gameplay.png)
 
 | Buy wheel with item pictures | Karambit with a custom blade colour |
 | --- | --- |

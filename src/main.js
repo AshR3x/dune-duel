@@ -1674,6 +1674,7 @@ function refreshMenuGun() {
     (navigator.clipboard?.writeText(text) ?? Promise.reject()).then(() => { $('tunecopy').textContent = 'Copied!'; }, () => { $('tunecopy').textContent = 'Copy failed (see console)'; console.log(text); });
     setTimeout(() => { $('tunecopy').textContent = 'Copy all values'; }, 1500);
   });
+  if (params.has('dev')) $('tunebtn').hidden = false;      // developer tool: open the game with ?dev to see it
   window.__toggleTune = () => {
     menuHold.open = !menuHold.open;
     panel.classList.toggle('hidden', !menuHold.open);
@@ -1812,7 +1813,7 @@ function frame(now) {
 // debug / test hooks (also used by the automated checks)
 window.__game = {
   P, bot, game, fx, grenades, drops, camera, THREE, castBullet, rayVsTarget, flashPop, spawnGrenade, explodeHE, startFire,
-  pBody, update, startRound, restartMatch, selectWeapon, selectSlot, playerShoot, applyPlayerDamage, damagePlayer, throwFromPlayer,
+  pBody, wheel, update, startRound, restartMatch, selectWeapon, selectSlot, playerShoot, applyPlayerDamage, damagePlayer, throwFromPlayer,
   purchase, giveGun, resetLoadout, addMoney, endRound, killBot, toggleZoom, wheelOpen, wheelPick, wheelMove, SHOP, WEAPONS,
   setMouse(l, r) { mouse.l = l; mouse.r = r; },
   manual(on = true) { game.manual = on; },
