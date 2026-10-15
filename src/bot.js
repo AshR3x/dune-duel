@@ -2,7 +2,7 @@
 // is blocked by smoke, can be flashed, and has to turn and aim before it hits you.
 import * as THREE from 'three';
 import { lineClear, findPath, pxToWorld, GOALS, resolveCircle, SPAWNS } from './map.js';
-import { buildWorldGun, WEAPONS, GRENADES, SHOP, allowedFor, defaultPistol, isGun } from './weapons.js';
+import { buildWorldGun, WEAPONS, GRENADES, SHOP, allowedFor, defaultPistol, isGun, tuning, isAuto } from './weapons.js';
 import { makeMuzzleFlash, flashShow, flashTick } from './fx.js';
 import { sfx } from './audio.js';
 
@@ -208,7 +208,7 @@ export class Bot {
   die() { this.alive = false; this.hp = 0; this.deathT = 0; this.speed = 0; }
 
   takeDamage(amount, fromX, fromZ) {
-    this.hp -= amount;
+    this.hp -= amount * tuning.dmg;
     this.sinceHit = 0;
     if (this.alive) {
       // react to being shot: remember where it came from
@@ -360,7 +360,7 @@ export class Bot {
 
       // move: strafe in bursts, advance when far, retreat to cover when hurt
       if (this.strafeT <= 0) {
-        this.strafeT = rnd(0.35, 0.8);
+        this.strafeT = rnd(0.35, 0.8) * tuning.strafe;
         this.strafeDir = Math.random() < 0.5 ? -1 : 1;
         this.moveT = Math.random() < 0.55 ? 0.35 : 0;   // sometimes stand still to shoot
         this.crouchPick = this.moveT <= 0 && dist > 7 && Math.random() < 0.5;   // ...and when standing still, often crouch to shoot
@@ -439,7 +439,7 @@ export class Bot {
         const dir = new THREE.Vector3(shootAt.x - origin.x, shootAt.y - origin.y, shootAt.z - origin.z).normalize();
         const moving = Math.min(1, this.speed / 4);
         const clsAcc = cls === 'sniper' ? 0.35 : cls === 'pistol' ? 1.2 : cls === 'smg' ? 1.1 : 1;
-        const spread = shootAt.wild || (this.d.spread * clsAcc * (1 + this.burst * (w.auto ? 0.45 : 0.2)) * (1 - 0.22 * this.crouch) + moving * (cls === 'sniper' ? 0.14 : 0.05));
+        const spread = shootAt.wild || (this.d.spread * clsAcc * (1 + this.burst * (isAuto(w) ? 0.45 : 0.2)) * (1 - 0.22 * this.crouch) + moving * (cls === 'sniper' ? 0.14 : 0.05));
         dir.x += (Math.random() - 0.5) * spread * 2;
         dir.y += (Math.random() - 0.5) * spread * 2;
         dir.z += (Math.random() - 0.5) * spread * 2;

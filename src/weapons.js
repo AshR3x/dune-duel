@@ -15,6 +15,11 @@ const CLS = {
   lmg:     { kick: 0.012, spreadBase: 0.004,  spreadMove: 0.07,  spreadAir: 0.1,  spreadShot: 0.0025, spreadMax: 0.06, adsFov: 68, adsAcc: 0.6,  flash: 0.22, noise: 54 },
 };
 
+// Game-mode knobs read by the player, the bot and the HUD. Classic is CS-like; Tracking trades one-shot kills and recoil for
+// longer fights where you have to keep your crosshair on a moving target.
+export const tuning = { dmg: 1, spread: 1, recoil: 1, strafe: 1, auto: false };
+export const isAuto = (w) => !!w.auto || (tuning.auto && (w.cls === 'pistol' || w.cls === 'smg' || w.cls === 'rifle' || w.cls === 'lmg'));
+
 const defs = [];
 function W(id, name, cls, cat, side, price, kill, dmg, ap, rm, rate, auto, mag, reserve, reload, csSpeed, x = {}) {
   defs.push({ id, name, cls, cat, side, price, kill, dmg, ap, rm, rate, auto, mag, reserve, reload, speed: csSpeed / 250, headMult: 4, ...CLS[cls], ...x });

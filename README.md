@@ -24,9 +24,15 @@ generated in code. Most guns use the CC0 [Ultimate Gun Pack](https://quaternius.
 Quaternius (FBX files in `assets/guns/`); the M249, Negev, P90 and Zeus fall back to built-in models.
 The sky is the CC0 "Citrus Orchard Puresky" HDRI from [Poly Haven](https://polyhaven.com/a/citrus_orchard_puresky),
 tone-mapped to a 2K JPEG (`assets/sky/sky.jpg`).
-The 52 rigged characters in `assets/characters/` come from Quaternius's CC0
-[Ultimate Animated Character Pack](https://quaternius.com/): pick yours in the main menu (drag the backdrop to rotate
-it); the enemy bot gets a random one every round.
+The blocky characters in `assets/blocky/` are Kenney's CC0 [Blocky Characters](https://kenney.nl/assets/blocky-characters):
+pick yours in the main menu (drag the backdrop to rotate it); the enemy bot gets a random one every round.
+**Import Minecraft skin** in the menu asks for a username and wears that player's skin on the same model. The skin is
+fetched live from public skin mirrors (minotar.net, mc-heads.net) and is never saved in this repo. Leave the name empty to
+go back to the default characters. Not affiliated with Mojang or Microsoft; Minecraft is their trademark.
+
+**Tracking mode** (the Mode button in the menu) turns it into a tracking shooter: fights last several seconds because damage is
+cut to 30%, headshots count 1.7x instead of 4x, there is no recoil, spread is tight, pistols, SMGs, rifles and LMGs are
+full auto, and the bot strafes more. An enemy health bar appears under the scoreboard. Classic mode is unchanged.
 
 ## Run it
 
@@ -46,7 +52,8 @@ Mouse look uses pointer lock; press `Esc` to pause.
 | --- | --- |
 | `W A S D` / `Space` | Move / jump |
 | `Shift` | Walk (silent) |
-| `Ctrl` (hold) | Crouch: slower, quiet, steadier aim, harder to hit |
+| `F5` | Cycle camera: first person, behind you, in front of you |
+| `Ctrl` or `X` (hold) | Crouch: slower, quiet, steadier aim, harder to hit |
 | Mouse / `LMB` | Aim / fire |
 | `RMB` | Hold: aim down sights. Scoped guns (AWP, SSG 08, G3SG1, SCAR-20, AUG, SG 553): click to cycle zoom. Knife: stab. Grenades: lob |
 | `R` | Reload |
@@ -91,11 +98,11 @@ The bot buys by the same rules (full buy, force buy, eco or save).
 | `src/bot.js` | Opponent AI: perception, A* movement, aiming, grenade use. |
 | `src/fx.js` | Pooled muzzle flashes, tracers, impacts and low-poly smoke. |
 | `src/weapons.js` | CS:GO-style weapon table, damage and armor model, knives, and the procedural fallback models. Loads the Quaternius gun models. |
-| `src/characters.js` | Rigged character loader: recolouring, animation state and the procedural crouch pose. |
+| `src/characters.js` | Blocky character loader, the Minecraft-skin model and its texture layout, animation mixing and the crouch squash. |
 | `src/icons.js` | Renders the item pictures (guns, grenades, armor) and head portraits used by the wheels, HUD and kill feed. |
-| `assets/` | `guns/` (Quaternius gun FBX files), `characters/` (52 character FBX files), `sky/` (tone-mapped HDRI). |
+| `assets/` | `guns/` (Quaternius gun FBX files), `blocky/` (Kenney character GLBs and textures), `sky/` (tone-mapped HDRI). |
 | `src/audio.js` | WebAudio-synthesised sound effects. |
-| `vendor/` | Three.js r160, its geometry utilities and the FBX loader (with fflate), vendored so the game works offline. |
+| `vendor/` | Three.js r160, its geometry utilities and the FBX and glTF loaders (with fflate), vendored so the game works offline. |
 
 The repository is about 120 MB because of the character models; they load one at a time, on demand.
 
@@ -113,7 +120,7 @@ top of `src/map.js`, so the layout is easy to change.
 ## Author
 
 Made by [AshR3x](https://github.com/AshR3x) with [Claude](https://claude.com/claude-code) (Anthropic) as a coding collaborator. Released under the [MIT License](LICENSE).
-Three.js (in `vendor/`) is MIT licensed by its own authors. The gun and character models are CC0 by Quaternius, and the sky is CC0 from Poly Haven.
+Three.js (in `vendor/`) is MIT licensed by its own authors. The gun models are CC0 by Quaternius, the characters are CC0 by Kenney, and the sky is CC0 from Poly Haven.
 
 ## Notes
 

@@ -5,12 +5,12 @@ import {
 import { buildWorld } from './world.js';
 import {
   WEAPONS, GRENADES, GRENADE_ORDER, SHOP, CATEGORIES, itemOf, isGun, slotOf, defaultPistol,
-  bulletDamage, armorSplit, buildViewModel, buildWorldGun, buildGrenadeMesh, loadGunAssets, KNIVES, KNIFE_ORDER, knifeStyle, setKnifeStyle,
+  bulletDamage, armorSplit, buildViewModel, buildWorldGun, buildItemModel, tuning, isAuto, buildGrenadeMesh, loadGunAssets, KNIVES, KNIFE_ORDER, knifeStyle, setKnifeStyle,
 } from './weapons.js';
 import { FX, makeMuzzleFlash, flashShow, flashTick, segmentBlockedBySmoke } from './fx.js';
 import { Bot, DIFFICULTY, makeModel } from './bot.js';
 import { makeIcons, headIcon, refreshIcon } from './icons.js';
-import { CHARACTERS, charLabel, loadCharacter } from './characters.js';
+import { CHARACTERS, charLabel, loadCharacter, fetchMinecraftSkin } from './characters.js';
 import { initAudio, setListener, sfx, flashRing } from './audio.js';
 
 // ------------------------------------------------------------------ setup
@@ -39,7 +39,7 @@ const store = {
   set(k, v) { try { localStorage.setItem('dd_' + k, v); } catch { /* storage may be unavailable */ } },
 };
 $('lw').textContent = `${store.get('wins', 0)} WINS`; $('ll').textContent = `${store.get('losses', 0)} LOSSES`;
-const settings = { diff: store.get('diff', 'normal'), sens: parseFloat(store.get('sens', '1')) };
+const settings = { diff: store.get('diff', 'normal'), sens: parseFloat(store.get('sens', '0.12')), mode: store.get('mode', 'classic') };
 if (!DIFFICULTY[settings.diff]) settings.diff = 'normal';
 // chosen knife and blade colour (the grip is always black)
 setKnifeStyle(KNIVES[store.get('knife', 'bayonet')] ? store.get('knife', 'bayonet') : 'bayonet', parseInt(String(store.get('kcolor', '#d9dde3')).replace('#', ''), 16) || 0xd9dde3);
@@ -137,6 +137,7 @@ const grenades = [];
 const drops = [];
 const keys = new Set();
 const mouse = { l: false, r: false };
+let view3 = 0;                                   // F5 camera: 0 first person, 1 behind you, 2 in front of you
 let pressedFire = false;
 
 const mySide = () => (game.sideT ? 'T' : 'CT');
@@ -350,7 +351,8 @@ function updateHud(dt) {
   const [h1, h2, v1, v2] = hud.cross.querySelectorAll('i');
   h1.style.left = -(gap + 9) + 'px'; h2.style.left = gap + 'px';
   v1.style.top = -(gap + 9) + 'px'; v2.style.top = gap + 'px';
-  hud.cross.style.display = P.alive && gunNow() && !scoped && P.ads < 0.3 ? '' : 'none';   // hidden while aiming down sights
+  if (settings.mode === 'tracking') $('ehpf').style.width = (game.round && bot.alive ? Math.max(0, bot.hp) : 0) + '%';
+  hud.cross.style.display = P.alive && !scoped && (view3 > 0 || (gunNow() && P.ads < 0.3)) ? '' : 'none';   // hidden while aiming down sights; third person has no sights, so it stays up
   hud.scope.style.opacity = scoped ? 1 : 0;
   hud.scope.className = 'hud ' + (curW()?.scopeKind === 'aug' ? 'aug' : '');
 
@@ -543,6 +545,7 @@ function currentSpread() {
   if (w.needScope && !zoomed) s += 0.045;
   if (!zoomed) s *= 1 - P.ads * (1 - w.adsAcc);
   s *= 1 - 0.25 * P.crouch;                       // crouching steadies your aim
+  s *= tuning.spread;
   return Math.min(w.spreadMax + (w.needScope && !zoomed ? 0.05 : 0), s);
 }
 
@@ -550,7 +553,7 @@ function eyePos(out = new THREE.Vector3()) { return out.set(P.x, P.y + P.eyeY, P
 
 function hurtPlayerFx(from) {
   hurtA = Math.min(1, 0.45 + 0.3);
-  P.punchP += 0.03; P.punchY += (Math.random() - 0.5) * 0.04;
+  P.punchP += 0.03 * tuning.recoil; P.punchY += (Math.random() - 0.5) * 0.04 * tuning.recoil;
   sfx.hurt();
   if (from) {
     const ang = Math.atan2(from.x - P.x, -(from.z - P.z)); // world bearing, 0 = -z
@@ -563,7 +566,7 @@ function hurtPlayerFx(from) {
 // `health` is already after armor; the bot earns `reward` when this kills
 function damagePlayer(health, head, from, label = 'AK-47', reward = 300) {
   if (!P.alive || game.phase !== 'live') return;
-  P.hp -= health;
+  P.hp -= health * tuning.dmg;
   hurtPlayerFx(from);
   if (P.hp <= 0) {
     P.hp = 0; P.alive = false; P.zoomLvl = 0;
@@ -625,8 +628,8 @@ function playerShoot() {
   }
   P.spray = Math.min(w.auto ? 12 : 3, P.spray + 1);
   const adsKick = 1 - P.ads * 0.2;
-  P.punchP = Math.min(0.32, P.punchP + w.kick * adsKick * (0.8 + Math.random() * 0.4));
-  P.punchY += (Math.random() - 0.5) * w.kick * (w.cls === 'rifle' || w.cls === 'lmg' ? 0.9 : 0.5);
+  P.punchP = Math.min(0.32, P.punchP + w.kick * adsKick * (0.8 + Math.random() * 0.4) * tuning.recoil);
+  P.punchY += (Math.random() - 0.5) * w.kick * (w.cls === 'rifle' || w.cls === 'lmg' ? 0.9 : 0.5) * tuning.recoil;
   vmAnim.kick = 1;
   const m = getVm(P.cur);
   if (m.flash) flashShow(m.flash, 0.05);
@@ -1121,8 +1124,8 @@ function updatePlayer(dt) {
     if (keys.has('KeyA')) ix -= 1; if (keys.has('KeyD')) ix += 1;
   }
   const len = Math.hypot(ix, iz) || 1;
-  // hold Ctrl to crouch: lower view, slower, quieter and a smaller target
-  const wantCrouch = (keys.has('ControlLeft') || keys.has('ControlRight')) ? 1 : 0;
+  // hold Ctrl or X to crouch: lower view, slower, quieter and a smaller target
+  const wantCrouch = (keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('KeyX')) ? 1 : 0;
   P.crouch += (wantCrouch - P.crouch) * Math.min(1, dt * 12);
   if (Math.abs(P.crouch - wantCrouch) < 0.01) P.crouch = wantCrouch;
   P.eyeY = 1.7 - 0.45 * P.crouch;
@@ -1229,7 +1232,7 @@ function updateWeapons(dt) {
     if ((fire || alt) && P.grenades[P.cur] > 0) P.throwing = { kind: P.cur, t: 0, thrown: false, soft: !fire };
   } else if (P.reloadT <= 0) {
     if (fire && P.nextFire <= 0) {
-      if (w.auto || !pressedFire) playerShoot();
+      if (isAuto(w) || !pressedFire) playerShoot();
     }
   }
   if (!fire) pressedFire = false; else pressedFire = true;
@@ -1275,11 +1278,96 @@ function update(dt) {
 }
 
 // ------------------------------------------------------------------ render
+// ------------------------------------------------------------------ third person (F5)
+// F5 cycles first person -> behind you -> in front of you. Your own body is only built and drawn in third person.
+let frameDt = 0.016;
+// Where the held weapon sits relative to the body (per weapon id). Edited live in the menu's "Adjust held weapon" panel and
+// saved in localStorage; the numbers it copies can be pasted back here as new defaults.
+const DEF_HOLD = { x: 0.5, y: 0.22, z: -0.58, rx: 0, ry: 0, rz: 0, s: 1.4 };   // taken from the USP-S placement you tuned; every weapon starts here
+let holdTune = {};
+try {
+  const r = await fetch('./assets/hold.json', { cache: 'no-store' });
+  if (!r.ok) throw new Error('no hold.json');
+  holdTune = await r.json();
+} catch {
+  try { holdTune = JSON.parse(store.get('holdtune', '{}')) || {}; } catch { holdTune = {}; }
+}
+const holdOf = (id) => ({ ...DEF_HOLD, ...(holdTune[id] || {}) });
+function placeHeld(obj, id) {
+  const h = holdOf(id);
+  obj.position.set(h.x, h.y, h.z); obj.rotation.set(h.rx, h.ry, h.rz); obj.scale.setScalar(h.s);
+}
+const pBody = { group: new THREE.Group(), aim: new THREE.Group(), skin: null, name: null, loading: null, item: null, itemId: null, rest: null };
+// the torso's position in the body group's own frame; the held weapon follows how far it has moved from standing still
+const torsoLocal = (out) => { const t = pBody.skin.obj.getObjectByName('torso'); pBody.group.updateMatrixWorld(true); t.getWorldPosition(out); return pBody.group.worldToLocal(out); };
+pBody.group.visible = false; pBody.group.add(pBody.aim); scene.add(pBody.group);
+async function ensurePlayerBody() {
+  const name = currentSkinName();
+  if (pBody.name === name || pBody.loading === name) return;
+  pBody.loading = name;
+  try {
+    const s = await loadCharacter(name);
+    if (currentSkinName() !== name) s.dispose();
+    else {
+      pBody.skin?.dispose(); pBody.skin = s; pBody.name = name; pBody.group.add(s.root);
+      s.play('Idle'); s.crouchK = 0; s.update(0); pBody.rest = torsoLocal(new THREE.Vector3());
+    }
+  } catch (e) { console.warn('player body failed', name, e); }
+  pBody.loading = null;
+}
+function updatePlayerBody(show) {
+  pBody.group.visible = show && !!pBody.skin;
+  if (!show) return;
+  ensurePlayerBody();
+  const s = pBody.skin;
+  if (!s) return;
+  pBody.group.position.set(P.x, P.y, P.z);
+  pBody.group.rotation.y = P.yaw;
+  if (!P.alive) s.play('Death', { loop: false, fade: 0.1 });
+  else if (P.speed > 3.6) s.play('Run_Carry', { speed: Math.min(1.3, P.speed / 5) });
+  else if (P.speed > 0.4) s.play('Walk_Carry', { speed: Math.max(0.6, P.speed / 3) });
+  else s.play('Idle');
+  s.crouchK = P.alive ? P.crouch : 0;
+  s.update(frameDt);
+  if (pBody.itemId !== P.cur) {
+    if (pBody.item) pBody.aim.remove(pBody.item);
+    pBody.item = buildItemModel(P.cur);
+    pBody.aim.add(pBody.item); pBody.itemId = P.cur;
+  }
+  placeHeld(pBody.item, P.cur);
+  pBody.aim.visible = P.alive;
+  // ride the torso: walking bob and crouching move the body, so the weapon moves with it instead of staying at a fixed height
+  const t = torsoLocal(new THREE.Vector3());
+  pBody.aim.position.set(t.x - pBody.rest.x, 1.1 + t.y - pBody.rest.y, -0.1 + t.z - pBody.rest.z);
+  pBody.aim.rotation.x = P.pitch;
+}
+
 function renderView() {
+  const tpp = view3 > 0 && !scopedNow() && !params.has('top');
   let eyeY = P.y + P.eyeY, tilt = 0;
   if (!P.alive) { eyeY = Math.max(0.3, P.y + 0.3); tilt = 0.5; }
-  camera.position.set(P.x, eyeY, P.z);
-  camera.rotation.set(Math.max(-1.55, Math.min(1.55, P.pitch + P.punchP)), P.yaw + P.punchY, tilt);
+  const pitch = Math.max(-1.55, Math.min(1.55, P.pitch + P.punchP)), yaw = P.yaw + P.punchY;
+  if (tpp) {
+    // pull the camera back along the view direction, stopping short of walls
+    const D = 2.4, sgn = view3 === 1 ? -1 : 1;
+    const f = forwardVec(yaw, pitch, new THREE.Vector3());
+    const hx = f.x * sgn, hz = f.z * sgn, hLen = Math.hypot(hx, hz) * D;
+    let k = 1;
+    if (hLen > 1e-3) { const hit = raycast(P.x, P.z, hx, hz, hLen + 0.3); if (hit < hLen + 0.3) k = Math.max(0.12, (hit - 0.3) / hLen); }
+    const ey = P.alive ? eyeY : P.y + 1.2;
+    let cx = P.x + f.x * sgn * D * k, cz = P.z + f.z * sgn * D * k;
+    if (view3 === 1) {
+      // over the shoulder: slide the camera right so your body sits left of the crosshair
+      const rx = Math.cos(yaw), rz = -Math.sin(yaw), side = Math.max(0, Math.min(0.65, raycast(cx, cz, rx, rz, 0.9) - 0.25));
+      cx += rx * side; cz += rz * side;
+    }
+    camera.position.set(cx, Math.max(0.25, ey + f.y * sgn * D * k + (view3 === 1 ? 0.15 : 0)), cz);
+    camera.rotation.set(view3 === 1 ? pitch : -pitch, view3 === 1 ? yaw : yaw + Math.PI, 0);
+  } else {
+    camera.position.set(P.x, eyeY, P.z);
+    camera.rotation.set(pitch, yaw, tilt);
+  }
+  updatePlayerBody(tpp);
   renderer.clear();
   if (params.has('top')) {
     const s = (N * CELL) / 2 + 2, ortho = new THREE.OrthographicCamera(-s, s, s, -s, 0.1, 200);
@@ -1290,7 +1378,7 @@ function renderView() {
   }
   renderer.render(scene, camera);
   if (!P.alive) return;
-  if (scopedNow()) return;     // looking through the scope: no viewmodel
+  if (scopedNow() || tpp) return;     // looking through the scope, or seeing your own body: no viewmodel
 
   // viewmodel pass
   renderer.clearDepth();
@@ -1356,6 +1444,7 @@ function renderView() {
 // ------------------------------------------------------------------ input
 window.addEventListener('keydown', (e) => {
   if (e.repeat || e.target.tagName === 'INPUT') return;   // typing a name must not trigger game keys
+  if (e.code === 'F5' && game.round && (game.locked || DEBUG)) { e.preventDefault(); view3 = (view3 + 1) % 3; return; }
   keys.add(e.code);
   if (e.code === 'Space' || (e.ctrlKey && game.locked)) e.preventDefault();
   if (!game.round || (!game.locked && !DEBUG)) return;
@@ -1412,6 +1501,23 @@ window.addEventListener('mousemove', (e) => {
 
 const menu = $('menu');
 const DIFFS = ['easy', 'normal', 'hard'];
+// Tracking mode: bots and you both have far more effective health, there is no recoil, spread is tight and most guns are
+// full auto, so fights are won by keeping the crosshair on a strafing target rather than by one-tap flicks.
+const modeLabel = () => `Mode: ${settings.mode === 'tracking' ? 'Tracking' : 'Classic'}`;
+function applyMode() {
+  const t = settings.mode === 'tracking';
+  Object.assign(tuning, t ? { dmg: 0.3, spread: 0.35, recoil: 0, strafe: 0.5, auto: true } : { dmg: 1, spread: 1, recoil: 1, strafe: 1, auto: false });
+  for (const id in WEAPONS) { const w = WEAPONS[id]; if (w.headMult) { w.hm0 ??= w.headMult; w.headMult = t ? 1.7 : w.hm0; } }
+  $('ehp').classList.toggle('hidden', !t);
+}
+$('modelbl').textContent = modeLabel();
+$('modebtn').addEventListener('click', () => {
+  settings.mode = settings.mode === 'tracking' ? 'classic' : 'tracking';
+  store.set('mode', settings.mode);
+  $('modelbl').textContent = modeLabel();
+  applyMode();
+});
+applyMode();
 const diffLabel = () => `Difficulty: ${settings.diff[0].toUpperCase()}${settings.diff.slice(1)}`;
 $('difflbl').textContent = diffLabel();
 $('diffbtn').addEventListener('click', () => {
@@ -1451,10 +1557,24 @@ function lockChange() {
   }
 }
 document.addEventListener('pointerlockchange', lockChange);
+
+// Ctrl+W (crouch + forward) and Ctrl+1..9 are browser shortcuts a page cannot cancel. Keyboard Lock hands them to the game,
+// but only in fullscreen and only in Chromium; elsewhere the leave prompt below is the safety net.
+const LOCK_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR', 'KeyE', 'KeyF', 'KeyQ', 'KeyB', 'KeyG', 'KeyC', 'KeyX',
+  'ControlLeft', 'ControlRight', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'];
+function goFullscreenLocked() {
+  try {
+    const fs = document.fullscreenElement ? Promise.resolve() : document.documentElement.requestFullscreen();
+    Promise.resolve(fs).then(() => navigator.keyboard?.lock(LOCK_KEYS)).catch(() => {});
+  } catch { /* no fullscreen or keyboard lock: crouch on X instead */ }
+}
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) navigator.keyboard?.unlock(); });
+window.addEventListener('beforeunload', (e) => { if (game.round && !game.matchOver) { e.preventDefault(); e.returnValue = ''; } });
 $('play').addEventListener('click', () => {
   if ($('play').disabled) return;
   initAudio();
   if (!game.round) restartMatch();
+  goFullscreenLocked();
   try {
     const r = canvas.requestPointerLock();
     if (r && r.catch) r.catch(() => { $('note').textContent = 'Pointer lock was blocked by the browser. Click Deploy again.'; });
@@ -1467,25 +1587,128 @@ $('sens').addEventListener('input', (e) => { settings.sens = parseFloat(e.target
 // ------------------------------------------------------------------ character picker (menu only)
 // Your character is only ever seen here (the game is first person). Drag the backdrop to spin it.
 let menuSkin = null, menuSpin = 0, skinToken = 0;
-let skinIdx = Math.max(0, CHARACTERS.indexOf(store.get('skin', 'Soldier_Male')));
+let skinIdx = Math.max(0, CHARACTERS.indexOf(store.get('skin', 'r')));
+let mcName = store.get('mcuser', '');                  // an imported Minecraft username replaces the blocky picker choice
+const currentSkinName = () => (mcName ? 'mc:' + mcName : CHARACTERS[skinIdx]);
 async function showMenuSkin() {
-  const name = CHARACTERS[skinIdx], tok = ++skinToken;
-  $('skinlbl').textContent = charLabel(name);
-  store.set('skin', name);
+  const name = currentSkinName(), tok = ++skinToken;
+  $('skinlbl').textContent = mcName ? mcName : charLabel(name);
+  store.set('skin', CHARACTERS[skinIdx]); store.set('mcuser', mcName);
   try {
     const s = await loadCharacter(name);
     if (tok !== skinToken) { s.dispose(); return; }
     if (menuSkin) menuSkin.dispose();
-    menuSkin = s; scene.add(s.root); s.play('Idle');
-    headIcon(name).then((u) => { if (CHARACTERS[skinIdx] === name) playerHead = u; });
-  } catch (e) { console.warn('character failed to load', name, e); }
+    menuSkin = s; scene.add(s.root); refreshMenuGun();
+    headIcon(name).then((u) => { if (currentSkinName() === name) playerHead = u; });
+  } catch (e) {
+    console.warn('character failed to load', name, e);
+    if (mcName && tok === skinToken) { mcName = ''; mcNote('Could not load that skin, using a default character.'); showMenuSkin(); }
+  }
 }
-$('skinprev').addEventListener('click', () => { skinIdx = (skinIdx + CHARACTERS.length - 1) % CHARACTERS.length; showMenuSkin(); });
-$('skinnext').addEventListener('click', () => { skinIdx = (skinIdx + 1) % CHARACTERS.length; showMenuSkin(); });
+// ---- "Adjust held weapon": the menu character holds a weapon and sliders move it live
+const menuHold = { aim: new THREE.Group(), item: null, id: null, open: false };
+menuHold.aim.position.set(0, 1.1, -0.1);
+function refreshMenuGun() {
+  if (!menuSkin) return;
+  menuSkin.root.add(menuHold.aim);
+  menuSkin.play(menuHold.open ? 'Idle' : 'Relaxed');
+  if (menuHold.item) { menuHold.aim.remove(menuHold.item); menuHold.item = null; }
+  menuHold.aim.visible = menuHold.open;
+  if (!menuHold.open) return;
+  menuHold.item = buildItemModel(menuHold.id);
+  menuHold.aim.add(menuHold.item);
+  placeHeld(menuHold.item, menuHold.id);
+}
+{
+  const ids = Object.keys(WEAPONS).filter((id) => isGun(id) || id === 'knife');
+  menuHold.id = ids.includes('ak47') ? 'ak47' : ids[0];
+  const SL = [['x', 'Right / left', -1.2, 1.2, 0.01], ['y', 'Up / down', -1, 1, 0.01], ['z', 'Forward / back', -1.2, 1.2, 0.01],
+    ['rx', 'Tilt up / down', -3.2, 3.2, 0.02], ['ry', 'Turn left / right', -3.2, 3.2, 0.02], ['rz', 'Roll', -3.2, 3.2, 0.02], ['s', 'Size', 0.4, 3, 0.02]];
+  const st = document.createElement('style');
+  st.textContent = `#tune{position:fixed;right:14px;top:14px;width:290px;padding:12px;background:rgba(18,20,26,.92);color:#fff;border:2px solid #555a63;z-index:30;font:12px system-ui,sans-serif;letter-spacing:.04em}
+#tune.hidden{display:none}#tune h4{margin:0 0 8px;font-size:12px;letter-spacing:.14em;text-transform:uppercase}
+#tune label{display:grid;grid-template-columns:96px 1fr 44px;gap:6px;align-items:center;margin:4px 0}#tune select,#tune button{width:100%;margin:4px 0;padding:6px;background:#3a3e45;color:#fff;border:2px solid #555a63;font:inherit;cursor:pointer}
+#tune button:hover{background:#d9731a;border-color:#fff}#tune .row2{display:flex;gap:6px}#tune small{opacity:.75;display:block;margin-top:6px}`;
+  document.head.appendChild(st);
+  const panel = document.createElement('div');
+  panel.id = 'tune'; panel.className = 'hidden';
+  panel.innerHTML = `<h4>Held weapon</h4><select id="tunew">${ids.map((id) => `<option value="${id}">${WEAPONS[id].name}</option>`).join('')}</select>` +
+    SL.map(([k, name, lo, hi, step]) => `<label>${name}<input type="range" data-k="${k}" min="${lo}" max="${hi}" step="${step}"><output data-o="${k}"></output></label>`).join('') +
+    `<div class="row2"><button id="tunereset">Reset</button><button id="tunecls">Apply to same type</button></div><button id="tunecopy">Copy all values</button>` +
+    `<small>Drag the background to rotate your character. Changes apply in third person.</small><small id="tunestat"></small>`;
+  document.body.appendChild(panel);
+  const sync = () => {
+    const h = holdOf(menuHold.id);
+    for (const [k] of SL) { panel.querySelector(`[data-k="${k}"]`).value = h[k]; panel.querySelector(`[data-o="${k}"]`).textContent = (+h[k]).toFixed(2); }
+    $('tunew').value = menuHold.id;
+  };
+  // saved into assets/hold.json through devserver.py (open.py starts it); a plain static server falls back to this browser
+  let saveT = 0;
+  const status = (t) => { $('tunestat').textContent = t; };
+  const save = () => {
+    store.set('holdtune', JSON.stringify(holdTune));
+    clearTimeout(saveT);
+    saveT = setTimeout(async () => {
+      try {
+        const r = await fetch('/__save_hold', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(holdTune) });
+        status(r.ok ? 'Saved to assets/hold.json' : 'Save failed (' + r.status + ')');
+      } catch { status('Saved in this browser only. Start the game with open.py to save into the project.'); }
+    }, 300);
+  };
+  panel.addEventListener('input', (e) => {
+    const k = e.target.dataset.k;
+    if (!k) return;
+    holdTune[menuHold.id] = { ...holdOf(menuHold.id), [k]: parseFloat(e.target.value) };
+    save(); sync();
+    if (menuHold.item) placeHeld(menuHold.item, menuHold.id);
+  });
+  $('tunew').addEventListener('change', (e) => { menuHold.id = e.target.value; sync(); refreshMenuGun(); });
+  $('tunereset').addEventListener('click', () => { delete holdTune[menuHold.id]; save(); sync(); if (menuHold.item) placeHeld(menuHold.item, menuHold.id); });
+  $('tunecls').addEventListener('click', () => {
+    const h = holdOf(menuHold.id), cls = WEAPONS[menuHold.id].cls;
+    for (const id of ids) if (WEAPONS[id].cls === cls) holdTune[id] = { ...h };
+    save();
+  });
+  $('tunecopy').addEventListener('click', () => {
+    const text = JSON.stringify(Object.fromEntries(ids.map((id) => [id, holdOf(id)])), null, 1);
+    (navigator.clipboard?.writeText(text) ?? Promise.reject()).then(() => { $('tunecopy').textContent = 'Copied!'; }, () => { $('tunecopy').textContent = 'Copy failed (see console)'; console.log(text); });
+    setTimeout(() => { $('tunecopy').textContent = 'Copy all values'; }, 1500);
+  });
+  window.__toggleTune = () => {
+    menuHold.open = !menuHold.open;
+    panel.classList.toggle('hidden', !menuHold.open);
+    $('tunebtn').textContent = menuHold.open ? 'Close weapon adjuster' : 'Adjust held weapon';
+    sync(); refreshMenuGun();
+  };
+}
+$('skinprev').addEventListener('click', () => { mcName = ''; skinIdx = (skinIdx + CHARACTERS.length - 1) % CHARACTERS.length; mcNote(''); showMenuSkin(); });
+$('skinnext').addEventListener('click', () => { mcName = ''; skinIdx = (skinIdx + 1) % CHARACTERS.length; mcNote(''); showMenuSkin(); });
+
+// "Import Minecraft skin": ask for a username, load that skin onto the blocky model; an empty name keeps the defaults
+function mcNote(t) { $('mcnote').textContent = t; }
+function mcForm(open) {
+  $('mcform').classList.toggle('hidden', !open);
+  $('mcbtn').classList.toggle('hidden', open);
+  if (open) { $('mcname').value = mcName; $('mcname').focus(); }
+}
+$('mcbtn').addEventListener('click', () => { mcNote(''); mcForm(true); });
+$('mccancel').addEventListener('click', () => mcForm(false));
+$('mcform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('mcname').value.trim();
+  mcForm(false);
+  if (!name) { mcName = ''; mcNote('No name given, using the default characters.'); showMenuSkin(); return; }
+  if (!/^[A-Za-z0-9_]{1,16}$/.test(name)) { mcNote('Minecraft names are 1-16 letters, digits or underscores.'); return; }
+  mcNote('Loading ' + name + '...');
+  try {
+    await fetchMinecraftSkin(name);
+    mcName = name; mcNote(''); showMenuSkin();
+  } catch { mcNote('Could not reach a skin server. Check your connection.'); }
+});
 {
   let drag = null;
   window.addEventListener('pointerdown', (e) => {
-    if (game.locked || (game.round && !game.matchOver) || e.target.closest('.left, #nametag') || e.button !== 0) return;
+    if (game.locked || (game.round && !game.matchOver) || e.target.closest('.left, #nametag, #tune') || e.button !== 0) return;
     drag = e.clientX; $('menu').classList.add('spin');
   });
   window.addEventListener('pointermove', (e) => { if (drag !== null) { menuSpin += (e.clientX - drag) * 0.012; drag = e.clientX; } });
@@ -1537,7 +1760,7 @@ function placeNameTag(x, y, z) {
 
 // random enemy skin each round, never the one you picked
 async function rollBotSkin() {
-  const pool = CHARACTERS.filter((n) => n !== CHARACTERS[skinIdx]);
+  const pool = mcName ? CHARACTERS : CHARACTERS.filter((n) => n !== CHARACTERS[skinIdx]);
   const name = pool[(Math.random() * pool.length) | 0];
   bot.name = randomName(); botHead = null;
   headIcon(name).then((u) => { botHead = u; });
@@ -1552,7 +1775,7 @@ function renderMenu(now, dt = 0.016) {
   camera.position.set(-8, 1.95 + Math.sin(t * 0.25) * 0.06, 33.5);
   camera.rotation.set(0.1, yaw, 0);
   camera.updateMatrixWorld();
-  const p = camera.localToWorld(new THREE.Vector3(0.85, -1.4, -1.45));
+  const p = camera.localToWorld(menuHold.open ? new THREE.Vector3(0.3, -1.45, -3.4) : new THREE.Vector3(0.85, -1.4, -1.45));   // stand back while adjusting the held weapon
   bot.model.root.visible = false;   // the opponent stays hidden until a match starts
   const facing = yaw + Math.PI - 0.2 + menuSpin;
   if (menuSkin) {
@@ -1578,7 +1801,7 @@ function renderMenu(now, dt = 0.016) {
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
+  last = now; frameDt = dt;
   if ((game.locked || DEBUG) && game.round && !game.manual) update(dt);
   document.body.classList.toggle('nomatch', !game.round);
   if (!game.round && !DEBUG) renderMenu(now, dt);
@@ -1589,7 +1812,7 @@ function frame(now) {
 // debug / test hooks (also used by the automated checks)
 window.__game = {
   P, bot, game, fx, grenades, drops, camera, THREE, castBullet, rayVsTarget, flashPop, spawnGrenade, explodeHE, startFire,
-  update, startRound, restartMatch, selectWeapon, selectSlot, playerShoot, applyPlayerDamage, damagePlayer, throwFromPlayer,
+  pBody, update, startRound, restartMatch, selectWeapon, selectSlot, playerShoot, applyPlayerDamage, damagePlayer, throwFromPlayer,
   purchase, giveGun, resetLoadout, addMoney, endRound, killBot, toggleZoom, wheelOpen, wheelPick, wheelMove, SHOP, WEAPONS,
   setMouse(l, r) { mouse.l = l; mouse.r = r; },
   manual(on = true) { game.manual = on; },
